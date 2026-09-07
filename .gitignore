@@ -22,3 +22,10 @@ out/
 
 # Logs
 *.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+staticfiles/
+db.sqlite3
