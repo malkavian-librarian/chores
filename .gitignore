@@ -8,6 +8,9 @@ Desktop.ini
 .idea/
 *.swp
 
+# Claude Code
+.claude/
+
 # Node
 node_modules/
 npm-debug.log*

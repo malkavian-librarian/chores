@@ -129,9 +129,20 @@ templates:
 - Completing a chore with an active recurrence creates the next
   occurrence (new `Chore` row) computed from `Recurrence`, rather than
   mutating `due_date` in place — keeps history honest.
-- Deleting/editing a `Category` in use does not delete chores; category
-  becomes null or reassigns per a single documented rule (decide before
-  implementing categories, record the decision here once made).
+- Deleting a custom `Category` in use nulls out `Chore.category` on any
+  Chore referencing it (`on_delete=models.SET_NULL`, requires
+  `Chore.category` to be nullable — see the Chore model, issue #7); it
+  does not delete or reassign the Chore itself, and does not reassign
+  the chore to another category. This is decided at the schema level
+  now (issue #6) but is only exercisable once the Chore model exists
+  (#7), since no Chore can reference a Category until then.
+- Only custom categories (`is_predefined=False`) can be renamed or
+  deleted. Predefined categories (`is_predefined=True`) can never be
+  renamed or deleted — attempting either is rejected (403 or a
+  redirect with an error message, not a 500) regardless of who
+  attempts it (plan.md §7: "Either partner can create, rename, or
+  delete custom categories" — predefined ones are excluded from that
+  grant entirely).
 
 ## 5. Views, Templates & HTMX Conventions
 
@@ -276,8 +287,6 @@ Mirrors plan.md §11, translated to engineering terms — do not add:
 Track anything not yet settled here until resolved, then move the
 resolution into the relevant section above:
 
-- Exact behavior when a `Category` in use is deleted (null out vs.
-  reassign) — see §4.
 - Whether the "first launch" onboarding (partner names → first chore)
   is a dedicated view/wizard or folded into the empty-household state
   of the main Household view.
