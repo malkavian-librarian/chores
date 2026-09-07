@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     "core",
     "households",
     "categories",
+    "chores",
 ]
 
 MIDDLEWARE = [
