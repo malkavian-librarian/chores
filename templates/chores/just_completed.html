@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block content %}
+<p>You're viewing household {{ household.slug }}.</p>
+<h1>{{ chore.title }}</h1>
+<p>Done! 🎉</p>
+
+<form method="post" action="{% url 'chores:chore_undo' slug=household.slug chore_id=chore.pk %}">
+  {% csrf_token %}
+  <button type="submit">Undo</button>
+</form>
+
+<p><a href="{% url 'households:detail' slug=household.slug %}">Back to household</a></p>
+{% endblock %}

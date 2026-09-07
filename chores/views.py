@@ -7,12 +7,21 @@ Constraints).
 
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
 from households.models import Household
 from households.views import _get_acting_as_partner
 
 from .forms import ChoreEditForm, ChoreQuickAddForm
-from .models import Chore
+from .models import Chore, ChoreStatus
+
+
+def _just_completed_session_key(slug, chore_id):
+    """Session key naming "this chore was just completed by this visitor,
+    in this browser, and hasn't been viewed on the confirmation page
+    yet" -- see `chore_complete`/`chore_just_completed` below.
+    """
+    return f"just_completed:{slug}:{chore_id}"
 
 
 def quick_add(request, slug):
@@ -111,11 +120,20 @@ def chore_detail(request, slug, chore_id):
         )
 
     can_delete = acting_as is not None and acting_as == chore.created_by
+    is_active = chore.status == ChoreStatus.ACTIVE
+    can_complete = acting_as is not None and is_active
 
     return render(
         request,
         "chores/detail.html",
-        {"household": household, "chore": chore, "form": form, "can_delete": can_delete},
+        {
+            "household": household,
+            "chore": chore,
+            "form": form,
+            "can_delete": can_delete,
+            "is_active": is_active,
+            "can_complete": can_complete,
+        },
     )
 
 
@@ -146,4 +164,107 @@ def chore_delete(request, slug, chore_id):
         return HttpResponseForbidden("Only the chore's creator may delete it.")
 
     chore.delete()
+    return redirect("households:detail", slug=slug)
+
+
+def chore_complete(request, slug, chore_id):
+    """`POST /h/<slug>/chores/<chore_id>/complete/` -- mark a chore done.
+
+    Per issue #12: follows `chore_delete`'s permission-check shape --
+    no acting-as partner selected means there is no identity to
+    attribute completion to, so the request is rejected with
+    `HttpResponseForbidden` (not a 500, not a silent redirect) and the
+    chore is left untouched. GET (or any other method) redirects to
+    the chore detail page rather than mutating anything.
+
+    Setting `status`/`completed_at`/`completed_by` is a no-op if the
+    chore is already `status=completed` -- a stale page, a
+    double-click, or a resubmitted form never overwrites the original
+    completion's timestamp/attribution.
+
+    Undo window (issue #12's Constraints): there is no server-enforced
+    expiry and no client-side JS timer. Instead, a one-shot session
+    flag is set here naming this household+chore, and redirects to the
+    `chore_just_completed` confirmation page below, which *consumes*
+    (pops) that flag on the very next GET. That makes the page's Undo
+    control genuinely one-time: reloading it, bookmarking it, or
+    reaching it any other way after the first render finds the flag
+    already gone and bounces to the plain chore detail page (which has
+    no Undo control) instead. This holds whether or not this POST
+    actually changed anything, so a double-Done still lands on the
+    confirmation page rather than a 500.
+    """
+    household = get_object_or_404(Household, slug=slug)
+    chore = get_object_or_404(household.chores, pk=chore_id)
+
+    if request.method != "POST":
+        return redirect("chores:chore_detail", slug=slug, chore_id=chore.pk)
+
+    partners = list(household.partners.all())
+    acting_as = _get_acting_as_partner(request, household, partners)
+
+    if acting_as is None:
+        return HttpResponseForbidden("Select an acting-as partner to complete a chore.")
+
+    if chore.status != ChoreStatus.COMPLETED:
+        chore.status = ChoreStatus.COMPLETED
+        chore.completed_at = timezone.now()
+        chore.completed_by = acting_as
+        chore.save()
+
+    request.session[_just_completed_session_key(slug, chore.pk)] = True
+    return redirect("chores:chore_just_completed", slug=slug, chore_id=chore.pk)
+
+
+def chore_just_completed(request, slug, chore_id):
+    """`GET /h/<slug>/chores/<chore_id>/completed/` -- one-time "Done!
+    Undo?" confirmation page.
+
+    Only ever renders the Undo control immediately after a successful
+    `chore_complete` POST from *this* browser session: it checks for
+    (and pops) the one-shot session flag `chore_complete` set. A first
+    visit right after Done finds the flag, consumes it, and renders
+    the confirmation template with the Undo form. Any later visit --
+    a reload, the back button, a bookmark, or navigating here
+    directly -- finds the flag already gone (it was popped the first
+    time) and redirects to the plain chore detail page instead, which
+    has no Undo control anywhere. This is the entire mechanism behind
+    issue #12's "no server-side time limit, offered exactly once"
+    Undo window.
+    """
+    household = get_object_or_404(Household, slug=slug)
+    chore = get_object_or_404(household.chores, pk=chore_id)
+
+    session_key = _just_completed_session_key(slug, chore.pk)
+    if not request.session.pop(session_key, False):
+        return redirect("chores:chore_detail", slug=slug, chore_id=chore.pk)
+
+    return render(request, "chores/just_completed.html", {"household": household, "chore": chore})
+
+
+def chore_undo(request, slug, chore_id):
+    """`POST /h/<slug>/chores/<chore_id>/undo/` -- revert a completion.
+
+    Per issue #12: only reachable in practice from the one-time
+    `chore_just_completed` page, but defensively a no-op regardless of
+    how it's reached -- if the chore isn't currently
+    `status=completed` (already undone, replayed/bookmarked POST, or a
+    later Done already happened), nothing is changed; `status`,
+    `completed_at`, and `completed_by` are left exactly as they are.
+    GET (or any other method) redirects to the chore detail page
+    rather than mutating anything, mirroring `chore_delete`/
+    `chore_complete`.
+    """
+    household = get_object_or_404(Household, slug=slug)
+    chore = get_object_or_404(household.chores, pk=chore_id)
+
+    if request.method != "POST":
+        return redirect("chores:chore_detail", slug=slug, chore_id=chore.pk)
+
+    if chore.status == ChoreStatus.COMPLETED:
+        chore.status = ChoreStatus.ACTIVE
+        chore.completed_at = None
+        chore.completed_by = None
+        chore.save()
+
     return redirect("households:detail", slug=slug)

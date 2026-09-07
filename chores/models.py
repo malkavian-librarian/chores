@@ -1,8 +1,8 @@
 """Chore model, fields only, per `_docs/arch.md` §4 and issue #7.
 
-This is the model-only slice of the Chore feature: `recurrence`,
-`completed_at`, and `completed_by` belong to the recurrence/completion
-issues (#15, #16, #12) and are deliberately absent here.
+This is the model-only slice of the Chore feature: `recurrence`
+belongs to the recurrence issues (#15/#16) and is deliberately absent
+here. `completed_at`/`completed_by` were added by issue #12.
 """
 
 from django.db import models
@@ -52,6 +52,14 @@ class Chore(models.Model):
         max_length=STATUS_MAX_LENGTH,
         choices=ChoreStatus.choices,
         default=ChoreStatus.ACTIVE,
+    )
+    completed_at = models.DateTimeField(null=True, blank=True)
+    completed_by = models.ForeignKey(
+        Partner,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="completed_chores",
     )
 
     def __str__(self):
