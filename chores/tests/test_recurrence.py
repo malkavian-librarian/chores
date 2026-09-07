@@ -155,6 +155,44 @@ class TestRecurrenceModel:
             recurrence.full_clean()
         assert "weekday" in exc_info.value.message_dict
 
+    # -- interval_after_completion kind (issue #16) --
+
+    def test_valid_interval_after_completion(self):
+        household, alice, bob = _household_with_partners("rec-interval")
+        chore = _chore(household, alice, bob)
+
+        recurrence = Recurrence(
+            chore=chore, kind=RecurrenceKind.INTERVAL_AFTER_COMPLETION, interval_days=7
+        )
+        recurrence.full_clean()
+        recurrence.save()
+
+        assert recurrence.interval_days == 7
+        assert recurrence.weekday is None
+        assert recurrence.month_day is None
+        assert recurrence.month_ordinal is None
+        assert recurrence.month_weekday is None
+
+    def test_clean_requires_interval_days_for_interval_kind(self):
+        household, alice, bob = _household_with_partners("rec-require-interval-days")
+        chore = _chore(household, alice, bob)
+
+        recurrence = Recurrence(chore=chore, kind=RecurrenceKind.INTERVAL_AFTER_COMPLETION)
+
+        with pytest.raises(ValidationError) as exc_info:
+            recurrence.full_clean()
+        assert "interval_days" in exc_info.value.message_dict
+
+    def test_clean_rejects_interval_days_for_other_kinds(self):
+        household, alice, bob = _household_with_partners("rec-reject-interval-days")
+        chore = _chore(household, alice, bob)
+
+        recurrence = Recurrence(chore=chore, kind=RecurrenceKind.FIXED_DAILY, interval_days=7)
+
+        with pytest.raises(ValidationError) as exc_info:
+            recurrence.full_clean()
+        assert "interval_days" in exc_info.value.message_dict
+
     # -- OneToOne enforcement --
 
     def test_chore_cannot_have_two_recurrence_rows(self):
@@ -272,6 +310,88 @@ class TestRecurrenceViewIntegration:
         chore = Chore.objects.get(household=household)
         assert getattr(chore, "recurrence", None) is None
 
+    # -- create with each interval preset via quick add (issue #16) --
+
+    def test_quick_add_creates_interval_recurrence_3_days(self, client):
+        household, alice, bob = _household_with_partners("qa-interval-3-days")
+
+        response = client.post(
+            self._quick_add_url(household),
+            self._base_post_data(
+                alice,
+                recurrence_kind="interval_after_completion",
+                recurrence_interval_preset="3_days",
+            ),
+        )
+
+        assert response.status_code == 302
+        chore = Chore.objects.get(household=household)
+        assert chore.recurrence.kind == RecurrenceKind.INTERVAL_AFTER_COMPLETION
+        assert chore.recurrence.interval_days == 3
+        assert chore.recurrence.weekday is None
+        assert chore.recurrence.month_day is None
+        assert chore.recurrence.month_ordinal is None
+        assert chore.recurrence.month_weekday is None
+
+    def test_quick_add_creates_interval_recurrence_1_week(self, client):
+        household, alice, bob = _household_with_partners("qa-interval-1-week")
+
+        response = client.post(
+            self._quick_add_url(household),
+            self._base_post_data(
+                alice,
+                recurrence_kind="interval_after_completion",
+                recurrence_interval_preset="1_week",
+            ),
+        )
+
+        assert response.status_code == 302
+        chore = Chore.objects.get(household=household)
+        assert chore.recurrence.interval_days == 7
+
+    def test_quick_add_creates_interval_recurrence_2_weeks(self, client):
+        household, alice, bob = _household_with_partners("qa-interval-2-weeks")
+
+        response = client.post(
+            self._quick_add_url(household),
+            self._base_post_data(
+                alice,
+                recurrence_kind="interval_after_completion",
+                recurrence_interval_preset="2_weeks",
+            ),
+        )
+
+        assert response.status_code == 302
+        chore = Chore.objects.get(household=household)
+        assert chore.recurrence.interval_days == 14
+
+    def test_quick_add_creates_interval_recurrence_1_month(self, client):
+        household, alice, bob = _household_with_partners("qa-interval-1-month")
+
+        response = client.post(
+            self._quick_add_url(household),
+            self._base_post_data(
+                alice,
+                recurrence_kind="interval_after_completion",
+                recurrence_interval_preset="1_month",
+            ),
+        )
+
+        assert response.status_code == 302
+        chore = Chore.objects.get(household=household)
+        assert chore.recurrence.interval_days == 30
+
+    def test_interval_without_preset_is_rejected(self, client):
+        household, alice, bob = _household_with_partners("qa-interval-missing")
+
+        response = client.post(
+            self._quick_add_url(household),
+            self._base_post_data(alice, recurrence_kind="interval_after_completion"),
+        )
+
+        assert response.status_code == 200
+        assert not Chore.objects.filter(household=household).exists()
+
     # -- form validation errors, does not save --
 
     def test_weekly_without_weekday_is_rejected(self, client):
@@ -335,6 +455,100 @@ class TestRecurrenceViewIntegration:
         assert chore.recurrence.month_day is None
         assert chore.recurrence.month_ordinal == 4
         assert chore.recurrence.month_weekday == 0
+
+    # -- kind switch: fixed -> interval and interval -> fixed (issue #16) --
+
+    def test_editing_weekly_to_interval_clears_weekday_and_sets_interval_days(self, client):
+        household, alice, bob = _household_with_partners("edit-weekly-to-interval")
+        chore = _chore(household, alice, bob)
+        Recurrence.objects.create(chore=chore, kind=RecurrenceKind.FIXED_WEEKLY, weekday=3)
+
+        response = client.post(
+            self._detail_url(household, chore),
+            self._base_post_data(
+                alice,
+                recurrence_kind="interval_after_completion",
+                recurrence_interval_preset="2_weeks",
+            ),
+        )
+
+        assert response.status_code == 302
+        chore.refresh_from_db()
+        assert chore.recurrence.kind == RecurrenceKind.INTERVAL_AFTER_COMPLETION
+        assert chore.recurrence.interval_days == 14
+        assert chore.recurrence.weekday is None
+        assert chore.recurrence.month_day is None
+        assert chore.recurrence.month_ordinal is None
+        assert chore.recurrence.month_weekday is None
+
+    def test_editing_interval_to_fixed_daily_clears_interval_days(self, client):
+        household, alice, bob = _household_with_partners("edit-interval-to-daily")
+        chore = _chore(household, alice, bob)
+        Recurrence.objects.create(
+            chore=chore, kind=RecurrenceKind.INTERVAL_AFTER_COMPLETION, interval_days=7
+        )
+
+        response = client.post(
+            self._detail_url(household, chore),
+            self._base_post_data(alice, recurrence_kind="fixed_daily"),
+        )
+
+        assert response.status_code == 302
+        chore.refresh_from_db()
+        assert chore.recurrence.kind == RecurrenceKind.FIXED_DAILY
+        assert chore.recurrence.interval_days is None
+
+    def test_editing_interval_to_no_recurrence_deletes_row(self, client):
+        household, alice, bob = _household_with_partners("edit-interval-to-none")
+        chore = _chore(household, alice, bob)
+        Recurrence.objects.create(
+            chore=chore, kind=RecurrenceKind.INTERVAL_AFTER_COMPLETION, interval_days=30
+        )
+
+        response = client.post(
+            self._detail_url(household, chore),
+            self._base_post_data(alice),
+        )
+
+        assert response.status_code == 302
+        chore.refresh_from_db()
+        assert getattr(chore, "recurrence", None) is None
+
+    def test_interval_kind_only_one_recurrence_row(self, client):
+        household, alice, bob = _household_with_partners("interval-onetoone")
+        chore = _chore(household, alice, bob)
+        Recurrence.objects.create(
+            chore=chore, kind=RecurrenceKind.INTERVAL_AFTER_COMPLETION, interval_days=3
+        )
+
+        client.post(
+            self._detail_url(household, chore),
+            self._base_post_data(
+                alice,
+                recurrence_kind="interval_after_completion",
+                recurrence_interval_preset="1_month",
+            ),
+        )
+
+        assert Recurrence.objects.filter(chore=chore).count() == 1
+        chore.refresh_from_db()
+        assert chore.recurrence.interval_days == 30
+
+    # -- edit form pre-fill for an existing interval recurrence --
+
+    def test_edit_form_prefills_interval_kind_and_preset(self, client):
+        household, alice, bob = _household_with_partners("edit-prefill-interval")
+        chore = _chore(household, alice, bob)
+        Recurrence.objects.create(
+            chore=chore, kind=RecurrenceKind.INTERVAL_AFTER_COMPLETION, interval_days=14
+        )
+
+        response = client.get(self._detail_url(household, chore))
+
+        assert response.status_code == 200
+        form = response.context["form"]
+        assert form.initial["recurrence_kind"] == RecurrenceKind.INTERVAL_AFTER_COMPLETION
+        assert form.initial["recurrence_interval_preset"] == "2_weeks"
 
     # -- removing recurrence --
 

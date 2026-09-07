@@ -30,17 +30,19 @@ WEEKDAY_CHOICES = [
 NO_RECURRENCE = ""
 MONTHLY = "monthly"
 
-#: The four UI-level choices from issue #15's acceptance criteria: "no
-#: recurrence", "Daily", "Weekly", "Monthly". "Monthly" is a single
-#: form-level choice that fans out into `fixed_monthly_date` or
-#: `fixed_monthly_relative` via `monthly_mode` below --
-#: `interval_after_completion` (issue #16) is deliberately not offered
-#: here.
+#: The five UI-level choices: "no recurrence", "Daily", "Weekly",
+#: "Monthly" (issue #15), and "Every X after completion" (issue #16).
+#: "Monthly" is a single form-level choice that fans out into
+#: `fixed_monthly_date` or `fixed_monthly_relative` via `monthly_mode`
+#: below. The interval choice uses `RecurrenceKind.INTERVAL_AFTER_COMPLETION`
+#: directly (no further fan-out needed) paired with the preset dropdown
+#: below.
 RECURRENCE_KIND_CHOICES = [
     (NO_RECURRENCE, "No recurrence"),
     (RecurrenceKind.FIXED_DAILY, "Daily"),
     (RecurrenceKind.FIXED_WEEKLY, "Weekly"),
     (MONTHLY, "Monthly"),
+    (RecurrenceKind.INTERVAL_AFTER_COMPLETION, "Every X after completion"),
 ]
 
 MONTHLY_MODE_DATE = "date"
@@ -50,6 +52,36 @@ MONTHLY_MODE_CHOICES = [
     (MONTHLY_MODE_DATE, "Specific date"),
     (MONTHLY_MODE_RELATIVE, "Relative day"),
 ]
+
+#: The four completion-based interval presets from `plan.md` §6. "1
+#: month" is stored as exactly 30 days -- a fixed simplification, not a
+#: calendar-month calculation (varies 28-31 days) -- per issue #16's
+#: acceptance criteria, so a later reader doesn't mistake 30 for a
+#: coincidence.
+INTERVAL_PRESET_3_DAYS = "3_days"
+INTERVAL_PRESET_1_WEEK = "1_week"
+INTERVAL_PRESET_2_WEEKS = "2_weeks"
+INTERVAL_PRESET_1_MONTH = "1_month"
+
+RECURRENCE_INTERVAL_PRESET_DAYS = {
+    INTERVAL_PRESET_3_DAYS: 3,
+    INTERVAL_PRESET_1_WEEK: 7,
+    INTERVAL_PRESET_2_WEEKS: 14,
+    INTERVAL_PRESET_1_MONTH: 30,
+}
+
+RECURRENCE_INTERVAL_PRESET_CHOICES = [
+    (INTERVAL_PRESET_3_DAYS, "3 days"),
+    (INTERVAL_PRESET_1_WEEK, "1 week"),
+    (INTERVAL_PRESET_2_WEEKS, "2 weeks"),
+    (INTERVAL_PRESET_1_MONTH, "1 month"),
+]
+
+#: Reverse lookup (interval_days -> preset key) used by `recurrence_initial()`
+#: to pre-fill the preset dropdown for an existing interval recurrence.
+_INTERVAL_DAYS_TO_PRESET = {
+    days: preset for preset, days in RECURRENCE_INTERVAL_PRESET_DAYS.items()
+}
 
 
 class BaseChoreForm(forms.Form):
@@ -93,6 +125,9 @@ class BaseChoreForm(forms.Form):
     recurrence_month_weekday = forms.TypedChoiceField(
         choices=WEEKDAY_CHOICES, coerce=int, required=False
     )
+    recurrence_interval_preset = forms.ChoiceField(
+        choices=RECURRENCE_INTERVAL_PRESET_CHOICES, required=False
+    )
 
     def __init__(self, *args, household, **kwargs):
         super().__init__(*args, **kwargs)
@@ -128,6 +163,14 @@ class BaseChoreForm(forms.Form):
                     self.add_error("recurrence_month_ordinal", "Choose which occurrence.")
                 if _is_blank("recurrence_month_weekday"):
                     self.add_error("recurrence_month_weekday", "Choose a weekday.")
+
+        if kind == RecurrenceKind.INTERVAL_AFTER_COMPLETION and _is_blank(
+            "recurrence_interval_preset"
+        ):
+            self.add_error(
+                "recurrence_interval_preset",
+                "Choose a preset for a completion-based interval recurrence.",
+            )
 
         return cleaned_data
 
@@ -170,7 +213,11 @@ class BaseChoreForm(forms.Form):
             "month_weekday": self.cleaned_data.get("recurrence_month_weekday")
             if actual_kind == RecurrenceKind.FIXED_MONTHLY_RELATIVE
             else None,
-            "interval_days": None,
+            "interval_days": RECURRENCE_INTERVAL_PRESET_DAYS.get(
+                self.cleaned_data.get("recurrence_interval_preset")
+            )
+            if actual_kind == RecurrenceKind.INTERVAL_AFTER_COMPLETION
+            else None,
         }
 
 
@@ -207,7 +254,12 @@ def recurrence_initial(recurrence):
     if recurrence.kind == RecurrenceKind.FIXED_DAILY:
         return {"recurrence_kind": RecurrenceKind.FIXED_DAILY}
 
-    # interval_after_completion (#16) has no fixed-schedule UI here.
+    if recurrence.kind == RecurrenceKind.INTERVAL_AFTER_COMPLETION:
+        return {
+            "recurrence_kind": RecurrenceKind.INTERVAL_AFTER_COMPLETION,
+            "recurrence_interval_preset": _INTERVAL_DAYS_TO_PRESET.get(recurrence.interval_days),
+        }
+
     return {}
 
 
