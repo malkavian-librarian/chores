@@ -326,4 +326,9 @@ class TestCompletedChoreExcludedFromActiveList:
         content = response.content.decode()
 
         assert "Pending task" in content
-        assert "Finished task" not in content
+        # As of issue #14, completed chores appear in the page's
+        # Completed section, so check the `active_chores` context
+        # rather than absence from the whole page.
+        titles = [c.title for c in response.context["active_chores"]]
+        assert "Finished task" not in titles
+        assert "Finished task" in content

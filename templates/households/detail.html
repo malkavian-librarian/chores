@@ -42,6 +42,21 @@
       <p>All done 🎉</p>
       <p><a href="{% url 'chores:quick_add' slug=household.slug %}">Add Chore</a></p>
     {% endif %}
+    <details>
+      <summary>Completed</summary>
+      {% if completed_chores %}
+        <ul>
+          {% for chore in completed_chores %}
+            <li>
+              {{ chore.title }} - {{ chore.completed_by.name }} - {{ chore.completed_at }}
+              {% if chore.note %}<p class="note">{{ chore.note }}</p>{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>No completed chores yet</p>
+      {% endif %}
+    </details>
   {% endif %}
 {% endif %}
 {% endblock %}

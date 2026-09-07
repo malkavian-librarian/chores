@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from chores.models import Chore, ChoreStatus
 from households.models import Household, Partner
-from households.views import SESSION_KEY
+from households.views import SESSION_KEY, _acting_as_session_key
 
 
 @pytest.mark.django_db
@@ -253,7 +253,11 @@ class TestDetailViewChoreList:
         assert "All done \U0001f389" not in content
         assert "Wash dishes" in content
 
-    def test_completed_chores_never_appear(self, client):
+    def test_completed_chores_never_appear_in_active_list(self, client):
+        """Completed chores are excluded from `active_chores` (issue #9);
+        as of issue #14 they instead appear in the Completed section, so
+        this checks the `active_chores` context rather than the whole
+        page."""
         household, alex, sam = self._household_with_partners("chores-completed")
         Chore.objects.create(
             household=household,
@@ -265,8 +269,8 @@ class TestDetailViewChoreList:
 
         response = client.get(self._url(household))
 
+        assert response.context["active_chores"] == []
         content = response.content.decode()
-        assert "Done already" not in content
         assert "All done \U0001f389" in content
 
     def test_chores_from_both_partners_appear_in_one_list(self, client):
@@ -450,3 +454,185 @@ class TestDetailViewOverdueMarking:
 
         titles = [c.title for c in response.context["active_chores"]]
         assert titles == ["Amy early", "Amy late overdue", "Bea chore"]
+
+
+@pytest.mark.django_db
+class TestDetailViewCompletedSection:
+    """Issue #14: collapsible "Completed" section with history."""
+
+    def _household_with_partners(self, slug, name_1="Alex", name_2="Sam"):
+        household = Household.objects.create(slug=slug)
+        partner_1 = Partner.objects.create(household=household, name=name_1)
+        partner_2 = Partner.objects.create(household=household, name=name_2)
+        return household, partner_1, partner_2
+
+    def _url(self, household):
+        return reverse("households:detail", kwargs={"slug": household.slug})
+
+    def _complete_url(self, household, chore):
+        return reverse(
+            "chores:chore_complete", kwargs={"slug": household.slug, "chore_id": chore.pk}
+        )
+
+    def _undo_url(self, household, chore):
+        return reverse("chores:chore_undo", kwargs={"slug": household.slug, "chore_id": chore.pk})
+
+    def _act_as(self, client, household, partner):
+        session = client.session
+        session[_acting_as_session_key(household.slug)] = partner.pk
+        session.save()
+
+    def test_section_is_a_collapsed_details_element(self, client):
+        household, alex, sam = self._household_with_partners("completed-collapsed-details")
+
+        response = client.get(self._url(household))
+
+        content = response.content.decode()
+        assert "<details>" in content
+        assert "<summary>Completed</summary>" in content
+        # "Collapsed by default" means no `open` attribute on <details>.
+        assert "<details open>" not in content
+
+    def test_empty_state_renders_without_error(self, client):
+        household, alex, sam = self._household_with_partners("completed-empty")
+
+        response = client.get(self._url(household))
+
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert "No completed chores yet" in content
+
+    def test_completed_chore_appears_with_title_completer_and_time(self, client):
+        household, alex, sam = self._household_with_partners("completed-fields")
+        completed_at = timezone.now()
+        Chore.objects.create(
+            household=household,
+            title="Wash dishes",
+            owner=alex,
+            created_by=alex,
+            status=ChoreStatus.COMPLETED,
+            completed_at=completed_at,
+            completed_by=sam,
+        )
+
+        response = client.get(self._url(household))
+
+        content = response.content.decode()
+        assert "Wash dishes" in content
+        assert sam.name in content
+        chore = response.context["completed_chores"][0]
+        assert chore.completed_at == completed_at
+
+    def test_completed_chore_with_note_shows_note(self, client):
+        household, alex, sam = self._household_with_partners("completed-with-note")
+        Chore.objects.create(
+            household=household,
+            title="Take out trash",
+            owner=alex,
+            created_by=alex,
+            status=ChoreStatus.COMPLETED,
+            completed_at=timezone.now(),
+            completed_by=sam,
+            note="Also recycled",
+        )
+
+        response = client.get(self._url(household))
+
+        assert "Also recycled" in response.content.decode()
+
+    def test_completed_chore_without_note_renders_without_error(self, client):
+        household, alex, sam = self._household_with_partners("completed-without-note")
+        Chore.objects.create(
+            household=household,
+            title="Vacuum",
+            owner=alex,
+            created_by=alex,
+            status=ChoreStatus.COMPLETED,
+            completed_at=timezone.now(),
+            completed_by=sam,
+            note="",
+        )
+
+        response = client.get(self._url(household))
+
+        assert response.status_code == 200
+        assert "Vacuum" in response.content.decode()
+
+    def test_active_chores_do_not_appear_in_completed_section(self, client):
+        household, alex, sam = self._household_with_partners("completed-active-excluded")
+        Chore.objects.create(
+            household=household, title="Still pending", owner=alex, created_by=alex
+        )
+
+        response = client.get(self._url(household))
+
+        assert response.context["completed_chores"] == []
+        assert "No completed chores yet" in response.content.decode()
+
+    def test_ordered_by_completed_at_descending(self, client):
+        household, alex, sam = self._household_with_partners("completed-ordering")
+        now = timezone.now()
+        older = Chore.objects.create(
+            household=household,
+            title="Older completion",
+            owner=alex,
+            created_by=alex,
+            status=ChoreStatus.COMPLETED,
+            completed_at=now - datetime.timedelta(days=1),
+            completed_by=sam,
+        )
+        newer = Chore.objects.create(
+            household=household,
+            title="Newer completion",
+            owner=alex,
+            created_by=alex,
+            status=ChoreStatus.COMPLETED,
+            completed_at=now,
+            completed_by=sam,
+        )
+
+        response = client.get(self._url(household))
+
+        titles = [c.title for c in response.context["completed_chores"]]
+        assert titles == [newer.title, older.title]
+
+    def test_undone_then_recompleted_chore_appears_once_with_latest_completion(self, client):
+        """Issue #12's Undo followed by re-completion: the chore must
+        appear in the Completed section reflecting the *second*
+        completion, purely because of the `status=completed` filter —
+        no special-case code needed."""
+        household, alex, sam = self._household_with_partners("completed-undo-then-redo")
+        chore = Chore.objects.create(
+            household=household, title="Mop floor", owner=alex, created_by=alex
+        )
+
+        self._act_as(client, household, alex)
+        client.post(self._complete_url(household, chore))
+        client.post(self._undo_url(household, chore))
+
+        response = client.get(self._url(household))
+        assert response.context["completed_chores"] == []
+        assert "Mop floor" not in response.content.decode().split("<details>")[1]
+
+        self._act_as(client, household, sam)
+        client.post(self._complete_url(household, chore))
+        response = client.get(self._url(household))
+
+        completed = response.context["completed_chores"]
+        assert len(completed) == 1
+        assert completed[0].pk == chore.pk
+        assert completed[0].completed_by == sam
+
+    def test_undone_chore_does_not_appear_in_completed_section(self, client):
+        household, alex, sam = self._household_with_partners("completed-undo-excluded")
+        chore = Chore.objects.create(
+            household=household, title="Fold laundry", owner=alex, created_by=alex
+        )
+
+        self._act_as(client, household, alex)
+        client.post(self._complete_url(household, chore))
+        client.post(self._undo_url(household, chore))
+
+        response = client.get(self._url(household))
+
+        assert response.context["completed_chores"] == []

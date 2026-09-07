@@ -92,6 +92,16 @@ def detail(request, slug):
             # `today` is fixed once per request via `timezone.localdate()`
             # (project has `USE_TZ = True`), never `date.today()`.
             chore.is_overdue = chore.due_date is not None and chore.due_date < today
+        # Issue #14: the "Completed" section's history. No `ChoreHistory`
+        # model — a `Chore`'s own row, once `status=completed`, is its own
+        # history for now (see issue #14 Constraints). A chore that was
+        # completed and then undone (#12) reverts to `status=active` and
+        # so is naturally excluded here without any special-case code.
+        completed_chores = list(
+            household.chores.filter(status=ChoreStatus.COMPLETED)
+            .select_related("completed_by")
+            .order_by("-completed_at")
+        )
         return render(
             request,
             "households/detail.html",
@@ -101,6 +111,7 @@ def detail(request, slug):
                 "acting_as": acting_as,
                 "active_chores": active_chores,
                 "has_active_chores": bool(active_chores),
+                "completed_chores": completed_chores,
             },
         )
 
