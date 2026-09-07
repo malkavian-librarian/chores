@@ -28,6 +28,12 @@
         </form>
       {% endfor %}
     </div>
+    <p><a href="{% url 'chores:quick_add' slug=household.slug %}">Add Chore</a></p>
+    <ul>
+      {% for chore in household.chores.all %}
+        <li>{{ chore.title }}</li>
+      {% endfor %}
+    </ul>
   {% endif %}
 {% endif %}
 {% endblock %}

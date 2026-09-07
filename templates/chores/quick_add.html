@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block content %}
+<p>You're viewing household {{ household.slug }}.</p>
+<h1>Add a chore</h1>
+<form method="post">
+  {% csrf_token %}
+  {{ form.title.errors }}
+  {{ form.title.label_tag }} {{ form.title }}
+  <details>
+    <summary>Add details</summary>
+    <p>{{ form.description.label_tag }} {{ form.description }}</p>
+    <p>{{ form.owner.errors }} {{ form.owner.label_tag }} {{ form.owner }}</p>
+    <p>{{ form.due_date.label_tag }} {{ form.due_date }}</p>
+    <p>{{ form.category.label_tag }} {{ form.category }}</p>
+  </details>
+  <button type="submit">Save</button>
+</form>
+{% endblock %}
