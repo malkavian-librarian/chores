@@ -5,12 +5,37 @@ Function-based views only, per `_docs/arch.md` §3.
 
 from django.db import transaction
 from django.http import Http404
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import PartnerNamingForm
 from .models import Household, Partner
 
 SESSION_KEY = "household_slug"
+
+
+def _acting_as_session_key(slug):
+    """Session key for the "acting as" partner selection, scoped to a
+    household by its slug so switching households in the same browser
+    session can never leak one household's selection into another's
+    (`_docs/arch.md` §2)."""
+    return f"acting_as:{slug}"
+
+
+def _get_acting_as_partner(request, household, partners):
+    """Resolve the currently-selected "acting as" partner for this
+    household from the session, or `None` if nothing valid is stored.
+
+    Falls back to `None` (rather than raising) when the session holds a
+    partner id that doesn't belong to this household — e.g. a stale
+    value left over from a future household-reset feature.
+    """
+    partner_id = request.session.get(_acting_as_session_key(household.slug))
+    if partner_id is None:
+        return None
+    for partner in partners:
+        if partner.pk == partner_id:
+            return partner
+    return None
 
 
 def index(request):
@@ -49,8 +74,11 @@ def detail(request, slug):
     if partners:
         if request.method == "POST":
             return redirect("households:detail", slug=slug)
+        acting_as = _get_acting_as_partner(request, household, partners)
         return render(
-            request, "households/detail.html", {"household": household, "partners": partners}
+            request,
+            "households/detail.html",
+            {"household": household, "partners": partners, "acting_as": acting_as},
         )
 
     form = PartnerNamingForm(request.POST if request.method == "POST" else None)
@@ -70,3 +98,26 @@ def detail(request, slug):
         return redirect("households:detail", slug=slug)
 
     return render(request, "households/detail.html", {"household": household, "form": form})
+
+
+def set_acting_as(request, slug):
+    """`POST /h/<slug>/acting-as/` — store which partner the visitor is
+    currently acting as, scoped to this household.
+
+    Only accepts POST (a selection is a state change, not a page fetch).
+    A `partner_id` that isn't a valid, existing partner of this household
+    is ignored rather than erroring, so a malformed or stale submission
+    just leaves the session unchanged and redirects back to the page.
+    """
+    if request.method != "POST":
+        return redirect("households:detail", slug=slug)
+
+    household = get_object_or_404(Household, slug=slug)
+
+    partner_id = request.POST.get("partner_id")
+    if partner_id is not None:
+        partner = household.partners.filter(pk=partner_id).first()
+        if partner is not None:
+            request.session[_acting_as_session_key(slug)] = partner.pk
+
+    return redirect("households:detail", slug=slug)

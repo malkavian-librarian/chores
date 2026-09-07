@@ -11,4 +11,19 @@
   {% if partners %}
     <p>{{ partners.0.name }} and {{ partners.1.name }}.</p>
   {% endif %}
+  {% if partners|length == 2 %}
+    <div>
+      {% if acting_as %}
+        <p>Acting as: {{ acting_as.name }}</p>
+      {% endif %}
+      <p>Who are you?</p>
+      {% for partner in partners %}
+        <form method="post" action="{% url 'households:set_acting_as' slug=household.slug %}">
+          {% csrf_token %}
+          <input type="hidden" name="partner_id" value="{{ partner.pk }}">
+          <button type="submit">Acting as {{ partner.name }}</button>
+        </form>
+      {% endfor %}
+    </div>
+  {% endif %}
 {% endif %}
