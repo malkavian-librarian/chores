@@ -3,6 +3,7 @@ from urllib.parse import quote
 
 import pytest
 from django.urls import reverse
+from django.utils import timezone
 
 from chores.models import Chore, ChoreStatus
 from households.models import Household, Partner
@@ -335,3 +336,117 @@ class TestDetailViewChoreList:
 
         titles = [c.title for c in response.context["active_chores"]]
         assert titles == ["Amy chore", "bea chore"]
+
+
+@pytest.mark.django_db
+class TestDetailViewOverdueMarking:
+    """Issue #10: visible "Overdue" marker on past-due chores."""
+
+    def _household_with_partners(self, slug, name_1="Alex", name_2="Sam"):
+        household = Household.objects.create(slug=slug)
+        partner_1 = Partner.objects.create(household=household, name=name_1)
+        partner_2 = Partner.objects.create(household=household, name=name_2)
+        return household, partner_1, partner_2
+
+    def _url(self, household):
+        return reverse("households:detail", kwargs={"slug": household.slug})
+
+    def test_past_due_date_is_marked_overdue(self, client):
+        household, alex, sam = self._household_with_partners("overdue-past")
+        yesterday = timezone.localdate() - datetime.timedelta(days=1)
+        Chore.objects.create(
+            household=household,
+            title="Late chore",
+            owner=alex,
+            created_by=alex,
+            due_date=yesterday,
+        )
+
+        response = client.get(self._url(household))
+
+        content = response.content.decode()
+        assert "Overdue" in content
+        chore = response.context["active_chores"][0]
+        assert chore.is_overdue is True
+
+    def test_due_date_today_is_not_overdue(self, client):
+        household, alex, sam = self._household_with_partners("overdue-today")
+        today = timezone.localdate()
+        Chore.objects.create(
+            household=household,
+            title="Due today chore",
+            owner=alex,
+            created_by=alex,
+            due_date=today,
+        )
+
+        response = client.get(self._url(household))
+
+        content = response.content.decode()
+        assert "Overdue" not in content
+        chore = response.context["active_chores"][0]
+        assert chore.is_overdue is False
+
+    def test_future_due_date_is_not_overdue(self, client):
+        household, alex, sam = self._household_with_partners("overdue-future")
+        tomorrow = timezone.localdate() + datetime.timedelta(days=1)
+        Chore.objects.create(
+            household=household,
+            title="Future chore",
+            owner=alex,
+            created_by=alex,
+            due_date=tomorrow,
+        )
+
+        response = client.get(self._url(household))
+
+        content = response.content.decode()
+        assert "Overdue" not in content
+        chore = response.context["active_chores"][0]
+        assert chore.is_overdue is False
+
+    def test_no_due_date_is_not_overdue(self, client):
+        household, alex, sam = self._household_with_partners("overdue-none")
+        Chore.objects.create(
+            household=household,
+            title="No due date chore",
+            owner=alex,
+            created_by=alex,
+        )
+
+        response = client.get(self._url(household))
+
+        content = response.content.decode()
+        assert "Overdue" not in content
+        chore = response.context["active_chores"][0]
+        assert chore.is_overdue is False
+
+    def test_ordering_unaffected_by_overdue_status(self, client):
+        household, alex, sam = self._household_with_partners("overdue-ordering", "Bea", "Amy")
+        yesterday = timezone.localdate() - datetime.timedelta(days=1)
+        Chore.objects.create(
+            household=household,
+            title="Amy late overdue",
+            owner=sam,
+            created_by=sam,
+            due_date=yesterday,
+        )
+        Chore.objects.create(
+            household=household,
+            title="Amy early",
+            owner=sam,
+            created_by=sam,
+            due_date=datetime.date(2026, 1, 1),
+        )
+        Chore.objects.create(
+            household=household,
+            title="Bea chore",
+            owner=alex,
+            created_by=alex,
+            due_date=datetime.date(2026, 1, 1),
+        )
+
+        response = client.get(self._url(household))
+
+        titles = [c.title for c in response.context["active_chores"]]
+        assert titles == ["Amy early", "Amy late overdue", "Bea chore"]

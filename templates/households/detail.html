@@ -32,7 +32,10 @@
     {% if has_active_chores %}
       <ul>
         {% for chore in active_chores %}
-          <li>{{ chore.title }} - {{ chore.owner.name }}</li>
+          <li>
+            {{ chore.title }} - {{ chore.owner.name }}
+            {% if chore.is_overdue %}<strong class="overdue">Overdue</strong>{% endif %}
+          </li>
         {% endfor %}
       </ul>
     {% else %}

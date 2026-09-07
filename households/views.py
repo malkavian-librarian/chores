@@ -8,6 +8,7 @@ from django.db.models import F
 from django.db.models.functions import Lower
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
 from chores.models import Chore, ChoreStatus
 
@@ -79,11 +80,18 @@ def detail(request, slug):
         if request.method == "POST":
             return redirect("households:detail", slug=slug)
         acting_as = _get_acting_as_partner(request, household, partners)
+        today = timezone.localdate()
         active_chores = list(
             Chore.objects.filter(household=household, status=ChoreStatus.ACTIVE)
             .select_related("owner")
             .order_by(Lower("owner__name"), F("due_date").asc(nulls_last=True))
         )
+        for chore in active_chores:
+            # Computed here (issue #10), not in the template, per
+            # `_docs/arch.md` §5 ("no business logic in templates").
+            # `today` is fixed once per request via `timezone.localdate()`
+            # (project has `USE_TZ = True`), never `date.today()`.
+            chore.is_overdue = chore.due_date is not None and chore.due_date < today
         return render(
             request,
             "households/detail.html",
