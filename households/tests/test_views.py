@@ -1,8 +1,10 @@
+import datetime
 from urllib.parse import quote
 
 import pytest
 from django.urls import reverse
 
+from chores.models import Chore, ChoreStatus
 from households.models import Household, Partner
 from households.views import SESSION_KEY
 
@@ -216,3 +218,120 @@ class TestDetailViewPartnerNaming:
         assert response.status_code == 302
         assert household.partners.count() == 2
         assert list(household.partners.values_list("name", flat=True)) == ["Alex", "Alex"]
+
+
+@pytest.mark.django_db
+class TestDetailViewChoreList:
+    """Issue #9: the shared, ordered active-chore list and empty state."""
+
+    def _household_with_partners(self, slug, name_1="Alex", name_2="Sam"):
+        household = Household.objects.create(slug=slug)
+        partner_1 = Partner.objects.create(household=household, name=name_1)
+        partner_2 = Partner.objects.create(household=household, name=name_2)
+        return household, partner_1, partner_2
+
+    def _url(self, household):
+        return reverse("households:detail", kwargs={"slug": household.slug})
+
+    def test_empty_state_shown_with_zero_active_chores(self, client):
+        household, alex, sam = self._household_with_partners("chores-empty")
+
+        response = client.get(self._url(household))
+
+        content = response.content.decode()
+        assert "All done \U0001f389" in content
+        assert reverse("chores:quick_add", kwargs={"slug": household.slug}) in content
+
+    def test_empty_state_hidden_when_active_chore_exists(self, client):
+        household, alex, sam = self._household_with_partners("chores-not-empty")
+        Chore.objects.create(household=household, title="Wash dishes", owner=alex, created_by=alex)
+
+        response = client.get(self._url(household))
+
+        content = response.content.decode()
+        assert "All done \U0001f389" not in content
+        assert "Wash dishes" in content
+
+    def test_completed_chores_never_appear(self, client):
+        household, alex, sam = self._household_with_partners("chores-completed")
+        Chore.objects.create(
+            household=household,
+            title="Done already",
+            owner=alex,
+            created_by=alex,
+            status=ChoreStatus.COMPLETED,
+        )
+
+        response = client.get(self._url(household))
+
+        content = response.content.decode()
+        assert "Done already" not in content
+        assert "All done \U0001f389" in content
+
+    def test_chores_from_both_partners_appear_in_one_list(self, client):
+        household, alex, sam = self._household_with_partners("chores-both-partners")
+        Chore.objects.create(household=household, title="Alex chore", owner=alex, created_by=alex)
+        Chore.objects.create(household=household, title="Sam chore", owner=sam, created_by=sam)
+
+        response = client.get(self._url(household))
+
+        content = response.content.decode()
+        assert "Alex chore" in content
+        assert "Sam chore" in content
+
+    def test_ordering_by_owner_name_then_due_date(self, client):
+        household, alex, sam = self._household_with_partners("chores-ordering", "Bea", "Amy")
+        Chore.objects.create(
+            household=household,
+            title="Amy late",
+            owner=sam,
+            created_by=sam,
+            due_date=datetime.date(2026, 1, 10),
+        )
+        Chore.objects.create(
+            household=household,
+            title="Amy early",
+            owner=sam,
+            created_by=sam,
+            due_date=datetime.date(2026, 1, 1),
+        )
+        Chore.objects.create(
+            household=household,
+            title="Bea chore",
+            owner=alex,
+            created_by=alex,
+            due_date=datetime.date(2026, 1, 1),
+        )
+
+        response = client.get(self._url(household))
+
+        titles = [c.title for c in response.context["active_chores"]]
+        assert titles == ["Amy early", "Amy late", "Bea chore"]
+
+    def test_ordering_nulls_last_within_same_owner(self, client):
+        household, alex, sam = self._household_with_partners("chores-nulls-last")
+        Chore.objects.create(household=household, title="No due date", owner=alex, created_by=alex)
+        Chore.objects.create(
+            household=household,
+            title="Has due date",
+            owner=alex,
+            created_by=alex,
+            due_date=datetime.date(2026, 1, 1),
+        )
+
+        response = client.get(self._url(household))
+
+        titles = [c.title for c in response.context["active_chores"]]
+        assert titles == ["Has due date", "No due date"]
+
+    def test_ordering_is_case_insensitive_by_owner_name(self, client):
+        household, alex, sam = self._household_with_partners(
+            "chores-case-insensitive", "bea", "Amy"
+        )
+        Chore.objects.create(household=household, title="bea chore", owner=alex, created_by=alex)
+        Chore.objects.create(household=household, title="Amy chore", owner=sam, created_by=sam)
+
+        response = client.get(self._url(household))
+
+        titles = [c.title for c in response.context["active_chores"]]
+        assert titles == ["Amy chore", "bea chore"]

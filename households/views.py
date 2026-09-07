@@ -4,8 +4,12 @@ Function-based views only, per `_docs/arch.md` §3.
 """
 
 from django.db import transaction
+from django.db.models import F
+from django.db.models.functions import Lower
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+
+from chores.models import Chore, ChoreStatus
 
 from .forms import PartnerNamingForm
 from .models import Household, Partner
@@ -75,10 +79,21 @@ def detail(request, slug):
         if request.method == "POST":
             return redirect("households:detail", slug=slug)
         acting_as = _get_acting_as_partner(request, household, partners)
+        active_chores = list(
+            Chore.objects.filter(household=household, status=ChoreStatus.ACTIVE)
+            .select_related("owner")
+            .order_by(Lower("owner__name"), F("due_date").asc(nulls_last=True))
+        )
         return render(
             request,
             "households/detail.html",
-            {"household": household, "partners": partners, "acting_as": acting_as},
+            {
+                "household": household,
+                "partners": partners,
+                "acting_as": acting_as,
+                "active_chores": active_chores,
+                "has_active_chores": bool(active_chores),
+            },
         )
 
     form = PartnerNamingForm(request.POST if request.method == "POST" else None)
