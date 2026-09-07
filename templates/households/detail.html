@@ -1,1 +1,14 @@
-<p>You're viewing household {{ household.slug }}.</p>
+{% if form %}
+  <p>You're viewing household {{ household.slug }}.</p>
+  <h1>Name your household's partners</h1>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Save</button>
+  </form>
+{% else %}
+  <p>You're viewing household {{ household.slug }}.</p>
+  {% if partners %}
+    <p>{{ partners.0.name }} and {{ partners.1.name }}.</p>
+  {% endif %}
+{% endif %}

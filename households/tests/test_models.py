@@ -1,7 +1,7 @@
 import pytest
 from django.db import IntegrityError
 
-from households.models import Household
+from households.models import Household, Partner
 
 
 @pytest.mark.django_db
@@ -45,3 +45,31 @@ class TestHouseholdModel:
 
         with pytest.raises(RuntimeError):
             Household.create_with_unique_slug()
+
+
+@pytest.mark.django_db
+class TestPartnerModel:
+    def test_fields(self):
+        household = Household.objects.create(slug="partner-fields")
+
+        partner = Partner.objects.create(household=household, name="Alex")
+
+        assert partner.household == household
+        assert partner.name == "Alex"
+
+    def test_related_name_is_partners(self):
+        household = Household.objects.create(slug="partner-related-name")
+        Partner.objects.create(household=household, name="Alex")
+        Partner.objects.create(household=household, name="Sam")
+
+        assert household.partners.count() == 2
+
+    def test_duplicate_names_within_household_are_allowed(self):
+        """Deliberate: the model does not enforce name uniqueness within a
+        household (issue #3)."""
+        household = Household.objects.create(slug="partner-duplicates")
+
+        Partner.objects.create(household=household, name="Alex")
+        Partner.objects.create(household=household, name="Alex")
+
+        assert household.partners.filter(name="Alex").count() == 2

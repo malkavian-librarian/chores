@@ -14,6 +14,8 @@ SLUG_MAX_LENGTH = 32
 SLUG_BYTES = 9
 MAX_SLUG_ATTEMPTS = 5
 
+PARTNER_NAME_MAX_LENGTH = 100
+
 
 class Household(models.Model):
     """A household, identified only by an unguessable slug.
@@ -50,3 +52,18 @@ class Household(models.Model):
         raise RuntimeError(
             f"Could not generate a unique household slug after {MAX_SLUG_ATTEMPTS} attempts"
         ) from last_error
+
+
+class Partner(models.Model):
+    """One of the two people in a household, per `_docs/arch.md` §4.
+
+    Exactly two are created together during first-launch onboarding
+    (see `households/forms.py` and the `detail` view). Duplicate names
+    within a household are deliberately allowed — see issue #3.
+    """
+
+    household = models.ForeignKey(Household, on_delete=models.CASCADE, related_name="partners")
+    name = models.CharField(max_length=PARTNER_NAME_MAX_LENGTH)
+
+    def __str__(self):
+        return self.name
