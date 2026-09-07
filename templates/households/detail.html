@@ -1,3 +1,6 @@
+{% extends "base.html" %}
+
+{% block content %}
 {% if form %}
   <p>You're viewing household {{ household.slug }}.</p>
   <h1>Name your household's partners</h1>
@@ -27,3 +30,4 @@
     </div>
   {% endif %}
 {% endif %}
+{% endblock %}

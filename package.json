@@ -1,0 +1,12 @@
+{
+  "name": "chores-frontend",
+  "private": true,
+  "description": "Tailwind CLI build for chores static CSS. See README.md for the build command.",
+  "scripts": {
+    "build:css": "tailwindcss -i static/css/src/input.css -o static/css/app.css --minify",
+    "watch:css": "tailwindcss -i static/css/src/input.css -o static/css/app.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.0"
+  }
+}

@@ -100,6 +100,17 @@ def detail(request, slug):
     return render(request, "households/detail.html", {"household": household, "form": form})
 
 
+def settings_placeholder(request):
+    """`GET /settings/` — placeholder page for the "Settings" nav link.
+
+    Not named `settings` as a Django app to avoid colliding with
+    `config/settings/` (see issue #4 Constraints); it lives as a plain
+    route on `households` instead, since it isn't household-scoped yet.
+    Real settings pages are #19/#20.
+    """
+    return render(request, "households/settings.html")
+
+
 def set_acting_as(request, slug):
     """`POST /h/<slug>/acting-as/` — store which partner the visitor is
     currently acting as, scoped to this household.
