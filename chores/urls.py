@@ -17,4 +17,9 @@ urlpatterns = [
         name="chore_just_completed",
     ),
     path("h/<str:slug>/chores/<int:chore_id>/undo/", views.chore_undo, name="chore_undo"),
+    path(
+        "h/<str:slug>/chores/<int:chore_id>/add-note/",
+        views.chore_add_note,
+        name="chore_add_note",
+    ),
 ]

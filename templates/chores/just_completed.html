@@ -10,5 +10,12 @@
   <button type="submit">Undo</button>
 </form>
 
+<form method="post" action="{% url 'chores:chore_add_note' slug=household.slug chore_id=chore.pk %}">
+  {% csrf_token %}
+  <label for="note">Add note</label>
+  <textarea id="note" name="note">{{ chore.note }}</textarea>
+  <button type="submit">Save note</button>
+</form>
+
 <p><a href="{% url 'households:detail' slug=household.slug %}">Back to household</a></p>
 {% endblock %}

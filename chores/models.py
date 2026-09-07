@@ -2,7 +2,12 @@
 
 This is the model-only slice of the Chore feature: `recurrence`
 belongs to the recurrence issues (#15/#16) and is deliberately absent
-here. `completed_at`/`completed_by` were added by issue #12.
+here. `completed_at`/`completed_by` were added by issue #12. `note`
+was added by issue #13 as a temporary home on `Chore` itself (rather
+than a `ChoreHistory` row, which doesn't exist yet) for an optional
+note on the chore's current/most-recent completion -- see issue #13's
+"Out of scope" for the planned follow-up migration onto
+`ChoreHistory`.
 """
 
 from django.db import models
@@ -61,6 +66,7 @@ class Chore(models.Model):
         on_delete=models.SET_NULL,
         related_name="completed_chores",
     )
+    note = models.TextField(blank=True, default="")
 
     def __str__(self):
         return self.title

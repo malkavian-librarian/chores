@@ -254,6 +254,10 @@ def chore_undo(request, slug, chore_id):
     GET (or any other method) redirects to the chore detail page
     rather than mutating anything, mirroring `chore_delete`/
     `chore_complete`.
+
+    Per issue #13: also resets `note` back to `""` when reverting, so a
+    note attached to the undone completion doesn't linger and get
+    misattributed to the chore's next completion.
     """
     household = get_object_or_404(Household, slug=slug)
     chore = get_object_or_404(household.chores, pk=chore_id)
@@ -265,6 +269,58 @@ def chore_undo(request, slug, chore_id):
         chore.status = ChoreStatus.ACTIVE
         chore.completed_at = None
         chore.completed_by = None
+        chore.note = ""
         chore.save()
 
     return redirect("households:detail", slug=slug)
+
+
+def chore_add_note(request, slug, chore_id):
+    """`POST /h/<slug>/chores/<chore_id>/add-note/` -- attach an optional
+    note to a chore's current completion.
+
+    Per issue #13: reachable in practice from the "Add note" form on
+    the one-time `chore_just_completed` confirmation page, alongside
+    Undo, but does not itself reuse that page's one-shot session flag
+    -- it only needs the chore to currently be `status=completed`
+    (there's only ever one completion in flight at a time, since
+    recurrence/history don't exist yet), which lets a note be added,
+    then resubmitted (overwriting, not appending) without a second
+    one-time flag to fight. GET (or any other method) redirects to the
+    chore detail page rather than mutating anything, mirroring
+    `chore_complete`/`chore_undo`.
+
+    Permission mirrors `chore_complete`: no acting-as partner selected
+    means there is no identity to attribute the note to, so the
+    request is rejected with `HttpResponseForbidden`. If the chore
+    isn't currently completed (already undone, or no completion yet),
+    this is a no-op redirect to the detail page -- there's no active
+    completion for the note to attach to.
+
+    The submitted text is stripped before saving; blank/whitespace-only
+    text is treated as no note and stored as `""` (matching the
+    `blank=True` `TextField` convention already used for
+    `description`), not as whitespace. Skipping this endpoint entirely
+    (navigating away from the confirmation page without submitting)
+    leaves `chore.note` exactly as it was -- `""` for a fresh
+    completion -- which is the default, non-blocking path.
+    """
+    household = get_object_or_404(Household, slug=slug)
+    chore = get_object_or_404(household.chores, pk=chore_id)
+
+    if request.method != "POST":
+        return redirect("chores:chore_detail", slug=slug, chore_id=chore.pk)
+
+    partners = list(household.partners.all())
+    acting_as = _get_acting_as_partner(request, household, partners)
+
+    if acting_as is None:
+        return HttpResponseForbidden("Select an acting-as partner to add a note.")
+
+    if chore.status != ChoreStatus.COMPLETED:
+        return redirect("chores:chore_detail", slug=slug, chore_id=chore.pk)
+
+    chore.note = request.POST.get("note", "").strip()
+    chore.save()
+
+    return render(request, "chores/just_completed.html", {"household": household, "chore": chore})
