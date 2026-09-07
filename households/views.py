@@ -3,6 +3,7 @@
 Function-based views only, per `_docs/arch.md` §3.
 """
 
+from django.contrib import messages
 from django.db import transaction
 from django.db.models import F
 from django.db.models.functions import Lower
@@ -12,8 +13,13 @@ from django.utils import timezone
 
 from chores.models import Chore, ChoreStatus
 
-from .forms import PartnerNamingForm, PartnerRenameForm
+from .forms import PartnerNamingForm, PartnerRenameForm, ResetDataForm
 from .models import Household, Partner
+
+#: The exact three "Reset data" option names (issue #20 Constraints --
+#: no "select all"/"everything" shortcut). Both the checkbox step and the
+#: confirmation step validate against this same list, via `ResetDataForm`.
+RESET_DATA_FIELDS = ("active_chores", "completed_history", "custom_categories")
 
 SESSION_KEY = "household_slug"
 
@@ -175,8 +181,130 @@ def settings(request, slug):
     return render(
         request,
         "households/settings.html",
-        {"household": household, "form": form, "partners": partners},
+        {
+            "household": household,
+            "form": form,
+            "partners": partners,
+            "reset_form": ResetDataForm(),
+        },
     )
+
+
+def _get_household_with_partners_or_redirect(slug):
+    """Shared guard for the reset-data views: fetch the household and its
+    partners, returning `(household, partners, None)` when there are at
+    least 2 partners, or `(None, None, redirect_response)` when the
+    household has fewer than 2 (pre-onboarding), matching `settings`'s
+    existing guard.
+    """
+    household = get_object_or_404(Household, slug=slug)
+    partners = list(household.partners.order_by("pk"))
+    if len(partners) < 2:
+        return None, None, redirect("households:detail", slug=household.slug)
+    return household, partners, None
+
+
+def _reset_data_selection_counts(household, selections):
+    """Row counts for each *selected* reset option, computed just before
+    rendering the confirmation page -- never persisted, always freshly
+    queried so the confirmed step can't act on stale numbers.
+    """
+    counts = {}
+    if selections["active_chores"]:
+        counts["active_chores"] = household.chores.filter(status=ChoreStatus.ACTIVE).count()
+    if selections["completed_history"]:
+        counts["completed_history"] = household.chores.filter(status=ChoreStatus.COMPLETED).count()
+    if selections["custom_categories"]:
+        counts["custom_categories"] = household.categories.filter(is_predefined=False).count()
+    return counts
+
+
+def reset_data(request, slug):
+    """`POST /h/<slug>/settings/reset/` — step 1 of the reset-data flow
+    (issue #20): take the "Reset data" checkbox selection from the
+    Settings page and show a confirmation page listing exactly what will
+    be deleted, with counts. Deletes nothing.
+
+    - Fewer than 2 `Partner` rows: redirect to household detail, same
+      guard as `settings`.
+    - Non-POST (e.g. a direct GET on this URL): redirect back to
+      Settings, where the checkboxes actually live -- nothing to show
+      here without a submitted selection.
+    - Zero boxes checked: accepted as a no-op, no confirmation page,
+      straight back to Settings with an informational message.
+    """
+    household, partners, guard_response = _get_household_with_partners_or_redirect(slug)
+    if guard_response is not None:
+        return guard_response
+
+    if request.method != "POST":
+        return redirect("households:settings", slug=slug)
+
+    form = ResetDataForm(request.POST)
+    if not form.is_valid():
+        return redirect("households:settings", slug=slug)
+
+    selections = {name: form.cleaned_data[name] for name in RESET_DATA_FIELDS}
+
+    if not any(selections.values()):
+        messages.info(request, "Nothing selected — no household data was deleted.")
+        return redirect("households:settings", slug=slug)
+
+    counts = _reset_data_selection_counts(household, selections)
+
+    return render(
+        request,
+        "households/reset_data_confirm.html",
+        {"household": household, "selections": selections, "counts": counts},
+    )
+
+
+def reset_data_confirm(request, slug):
+    """`POST /h/<slug>/settings/reset/confirm/` — step 2 of the reset-data
+    flow (issue #20): actually perform the deletion(s) the user just saw
+    counts for, atomically, then redirect back to Settings.
+
+    Re-validates the selection carried forward as hidden fields rather
+    than trusting a session flag, and re-derives every query from
+    `RESET_DATA_FIELDS`/`household` scoping rather than accepting any
+    row ids from the client -- so a manipulated POST can, at most, select
+    a subset of these three fixed, household-scoped deletions. In
+    particular, predefined categories are never reachable here: the
+    "Custom categories" branch always filters `is_predefined=False`
+    regardless of what else is in the request body.
+
+    - Fewer than 2 `Partner` rows: redirect to household detail.
+    - Non-POST, or zero boxes selected: no-op back to Settings, same as
+      `reset_data`'s guards -- reachable if this URL is hit directly
+      without going through the confirmation page.
+    """
+    household, partners, guard_response = _get_household_with_partners_or_redirect(slug)
+    if guard_response is not None:
+        return guard_response
+
+    if request.method != "POST":
+        return redirect("households:settings", slug=slug)
+
+    form = ResetDataForm(request.POST)
+    if not form.is_valid():
+        return redirect("households:settings", slug=slug)
+
+    selections = {name: form.cleaned_data[name] for name in RESET_DATA_FIELDS}
+
+    if not any(selections.values()):
+        messages.info(request, "Nothing selected — no household data was deleted.")
+        return redirect("households:settings", slug=slug)
+
+    with transaction.atomic():
+        if selections["active_chores"]:
+            household.chores.filter(status=ChoreStatus.ACTIVE).delete()
+        if selections["completed_history"]:
+            household.chores.filter(status=ChoreStatus.COMPLETED).delete()
+        if selections["custom_categories"]:
+            household.categories.filter(is_predefined=False).delete()
+
+    messages.success(request, "Selected household data has been reset.")
+    return redirect("households:settings", slug=slug)
 
 
 def set_acting_as(request, slug):

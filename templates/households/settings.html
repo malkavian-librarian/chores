@@ -8,4 +8,12 @@
     {{ form.as_p }}
     <button type="submit">Save</button>
   </form>
+
+  <h2>Reset data</h2>
+  <p>Select what to clear. Nothing is deleted until you confirm on the next page.</p>
+  <form method="post" action="{% url 'households:reset_data' slug=household.slug %}">
+    {% csrf_token %}
+    {{ reset_form.as_p }}
+    <button type="submit">Continue</button>
+  </form>
 {% endblock %}

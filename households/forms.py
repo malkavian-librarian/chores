@@ -50,3 +50,22 @@ class PartnerRenameForm(forms.Form):
         max_length=PARTNER_NAME_MAX_LENGTH,
         strip=True,
     )
+
+
+class ResetDataForm(forms.Form):
+    """Settings-page "Reset data" checkboxes (issue #20).
+
+    Exactly three independent, unchecked-by-default options -- no
+    "select all" shortcut, per issue #20's Constraints. All fields are
+    optional booleans: submitting with zero boxes checked is a valid,
+    accepted no-op rather than a validation error.
+
+    The same form class renders the initial checkboxes (on the Settings
+    page) and re-validates the selection carried forward as hidden
+    fields on the confirmation page's POST, so both steps agree on the
+    exact set of valid option names.
+    """
+
+    active_chores = forms.BooleanField(label="Active chores", required=False)
+    completed_history = forms.BooleanField(label="Completed history", required=False)
+    custom_categories = forms.BooleanField(label="Custom categories", required=False)

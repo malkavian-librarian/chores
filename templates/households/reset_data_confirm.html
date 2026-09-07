@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <h1>Confirm reset</h1>
+  <p>This will permanently delete:</p>
+  <ul>
+    {% if "active_chores" in counts %}
+      <li>Active chores: {{ counts.active_chores }}</li>
+    {% endif %}
+    {% if "completed_history" in counts %}
+      <li>Completed history: {{ counts.completed_history }}</li>
+    {% endif %}
+    {% if "custom_categories" in counts %}
+      <li>Custom categories: {{ counts.custom_categories }}</li>
+    {% endif %}
+  </ul>
+  <form method="post" action="{% url 'households:reset_data_confirm' slug=household.slug %}">
+    {% csrf_token %}
+    {% if selections.active_chores %}
+      <input type="hidden" name="active_chores" value="on">
+    {% endif %}
+    {% if selections.completed_history %}
+      <input type="hidden" name="completed_history" value="on">
+    {% endif %}
+    {% if selections.custom_categories %}
+      <input type="hidden" name="custom_categories" value="on">
+    {% endif %}
+    <button type="submit">Confirm</button>
+  </form>
+  <a href="{% url 'households:settings' slug=household.slug %}">Cancel</a>
+{% endblock %}
