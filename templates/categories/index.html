@@ -4,7 +4,28 @@
   <h1>Categories</h1>
   <ul>
     {% for category in categories %}
-      <li>{{ category.name }}</li>
+      <li>
+        {% if category.is_predefined %}
+          {{ category.name }}
+        {% else %}
+          <form method="post" action="{% url 'categories:rename' slug=household.slug pk=category.pk %}" class="inline-form">
+            {% csrf_token %}
+            <input type="text" name="name" value="{{ category.name }}" maxlength="100">
+            <button type="submit">Rename</button>
+          </form>
+          <form method="post" action="{% url 'categories:delete' slug=household.slug pk=category.pk %}" class="inline-form" onsubmit="return confirm('Delete this category?');">
+            {% csrf_token %}
+            <button type="submit">Delete</button>
+          </form>
+        {% endif %}
+      </li>
     {% endfor %}
   </ul>
+
+  <h2>Add a category</h2>
+  <form method="post" action="{% url 'categories:create' slug=household.slug %}">
+    {% csrf_token %}
+    <input type="text" name="name" placeholder="New category name" maxlength="100">
+    <button type="submit">Add</button>
+  </form>
 {% endblock %}

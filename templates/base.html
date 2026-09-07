@@ -15,6 +15,13 @@
     </div>
   </nav>
   <main class="max-w-2xl mx-auto px-4 py-6">
+    {% if messages %}
+      <ul class="messages">
+        {% for message in messages %}
+          <li class="message {{ message.tags }}">{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
 </body>
