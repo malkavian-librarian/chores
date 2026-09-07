@@ -340,6 +340,103 @@ class TestNextOccurrenceIntegration:
         assert chore.status == ChoreStatus.ACTIVE
         assert Chore.objects.count() == 1
 
+    # -- editing recurrence before completion is picked up by the next
+    # occurrence, and never touches already-completed history (issue #18) --
+
+    def test_editing_recurrence_before_completion_uses_new_rule_for_next_occurrence(self, client):
+        """#18's second acceptance criterion: edit a recurring chore's
+        rule via `chore_detail` (weekly Monday -> weekly Friday), then
+        complete it, and assert the generated next occurrence's
+        `due_date` matches what the *new* rule produces -- not what the
+        old rule would have produced. Monday and Friday can never
+        compute to the same next date within a 7-day window, so this
+        would fail outright if a stale/cached recurrence were read
+        instead of the current row.
+        """
+        household, alice, bob = self._household_with_partners("edit-then-complete-new-rule")
+        chore = self._chore(household, owner=alice, created_by=alice)
+        Recurrence.objects.create(chore=chore, kind=RecurrenceKind.FIXED_WEEKLY, weekday=0)  # Mon
+        self._act_as(client, household, alice)
+
+        edit_url = reverse(
+            "chores:chore_detail", kwargs={"slug": household.slug, "chore_id": chore.pk}
+        )
+        edit_response = client.post(
+            edit_url,
+            {
+                "title": chore.title,
+                "description": chore.description,
+                "owner": alice.pk,
+                "recurrence_kind": "fixed_weekly",
+                "recurrence_weekday": 4,  # Friday
+            },
+        )
+        assert edit_response.status_code == 302
+        chore.refresh_from_db()
+        assert chore.recurrence.weekday == 4  # edit landed before completion
+
+        client.post(self._complete_url(household, chore))
+
+        chore.refresh_from_db()
+        next_chore = Chore.objects.exclude(pk=chore.pk).get()
+
+        old_rule = _FakeRecurrence(RecurrenceKind.FIXED_WEEKLY, weekday=0)
+        new_rule = _FakeRecurrence(RecurrenceKind.FIXED_WEEKLY, weekday=4)
+        due_date_under_old_rule = compute_next_due_date(old_rule, chore.completed_at)
+        due_date_under_new_rule = compute_next_due_date(new_rule, chore.completed_at)
+
+        # Sanity check that this scenario is actually discriminating.
+        assert due_date_under_old_rule != due_date_under_new_rule
+
+        assert next_chore.due_date == due_date_under_new_rule
+        assert next_chore.recurrence.kind == RecurrenceKind.FIXED_WEEKLY
+        assert next_chore.recurrence.weekday == 4
+
+    def test_editing_generated_occurrences_recurrence_does_not_touch_completed_history(
+        self, client
+    ):
+        """#18's third acceptance criterion: after completing a
+        recurring chore (producing a completed chore plus a freshly
+        generated active occurrence), editing the *new* occurrence's
+        recurrence must not retroactively change the already-completed
+        chore's `due_date`, `completed_at`, `completed_by`, or `status`.
+        """
+        household, alice, bob = self._household_with_partners("edit-new-occurrence-no-history")
+        chore = self._chore(household, owner=alice, created_by=alice)
+        Recurrence.objects.create(chore=chore, kind=RecurrenceKind.FIXED_DAILY)
+        self._act_as(client, household, alice)
+
+        client.post(self._complete_url(household, chore))
+        chore.refresh_from_db()
+        original_due_date = chore.due_date
+        original_completed_at = chore.completed_at
+        original_completed_by_id = chore.completed_by_id
+        original_status = chore.status
+
+        next_chore = Chore.objects.exclude(pk=chore.pk).get()
+        edit_url = reverse(
+            "chores:chore_detail", kwargs={"slug": household.slug, "chore_id": next_chore.pk}
+        )
+        edit_response = client.post(
+            edit_url,
+            {
+                "title": next_chore.title,
+                "description": next_chore.description,
+                "owner": alice.pk,
+                "recurrence_kind": "fixed_weekly",
+                "recurrence_weekday": 2,
+            },
+        )
+        assert edit_response.status_code == 302
+        next_chore.refresh_from_db()
+        assert next_chore.recurrence.kind == RecurrenceKind.FIXED_WEEKLY  # edit landed
+
+        chore.refresh_from_db()
+        assert chore.due_date == original_due_date
+        assert chore.completed_at == original_completed_at
+        assert chore.completed_by_id == original_completed_by_id
+        assert chore.status == original_status
+
     def test_old_completed_chore_still_shows_in_completed_section(self, client):
         household, alice, bob = self._household_with_partners("gen-old-chore-in-completed")
         chore = self._chore(household, owner=alice, created_by=alice)

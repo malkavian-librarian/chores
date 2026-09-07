@@ -456,6 +456,36 @@ class TestRecurrenceViewIntegration:
         assert chore.recurrence.month_ordinal == 4
         assert chore.recurrence.month_weekday == 0
 
+    # -- editing a recurrence field within the same kind (issue #18) --
+
+    def test_editing_weekly_weekday_updates_same_chores_recurrence_row(self, client):
+        """Confirms #18's first acceptance criterion: editing a chore's
+        recurrence via `chore_detail` (same kind, different value)
+        changes that same chore's `Recurrence` row immediately, visible
+        on a fresh fetch (`refresh_from_db`) -- not a new row, not a
+        different chore.
+        """
+        household, alice, bob = _household_with_partners("edit-weekday-in-place")
+        chore = _chore(household, alice, bob)
+        recurrence = Recurrence.objects.create(
+            chore=chore,
+            kind=RecurrenceKind.FIXED_WEEKLY,
+            weekday=0,  # Monday
+        )
+
+        response = client.post(
+            self._detail_url(household, chore),
+            self._base_post_data(alice, recurrence_kind="fixed_weekly", recurrence_weekday=4),
+        )
+
+        assert response.status_code == 302
+        chore.refresh_from_db()
+        assert chore.recurrence.kind == RecurrenceKind.FIXED_WEEKLY
+        assert chore.recurrence.weekday == 4  # Friday, not the original Monday
+        # Same row was mutated in place, not replaced.
+        assert chore.recurrence.pk == recurrence.pk
+        assert Recurrence.objects.filter(chore=chore).count() == 1
+
     # -- kind switch: fixed -> interval and interval -> fixed (issue #16) --
 
     def test_editing_weekly_to_interval_clears_weekday_and_sets_interval_days(self, client):
