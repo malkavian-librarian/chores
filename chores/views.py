@@ -14,6 +14,7 @@ from households.views import _get_acting_as_partner
 
 from .forms import ChoreEditForm, ChoreQuickAddForm, recurrence_initial
 from .models import Chore, ChoreStatus, Recurrence
+from .recurrence import compute_next_due_date
 
 
 def _apply_recurrence(chore, recurrence_kwargs):
@@ -50,6 +51,67 @@ def _just_completed_session_key(slug, chore_id):
     yet" -- see `chore_complete`/`chore_just_completed` below.
     """
     return f"just_completed:{slug}:{chore_id}"
+
+
+def _generated_chore_session_key(slug, chore_id):
+    """Session key naming "completing this chore generated this next
+    occurrence" -- issue #17's chosen mechanism for `chore_undo` to find
+    (and delete) the occurrence a completion generated.
+
+    Deliberately a *separate* session key from
+    `_just_completed_session_key` rather than folded into it: the
+    just-completed flag is popped (consumed) the first time the
+    confirmation page is viewed (issue #12's one-shot mechanism), but
+    Undo -- POSTed *from* that same page -- still needs to know which
+    chore it generated at that point. Keeping this key separate, and
+    popping it only in `chore_undo` itself, means it survives exactly
+    as long as it needs to: set on a successful `chore_complete` that
+    generated an occurrence, read once (and removed) by `chore_undo`
+    when it actually reverts the completion, without racing the
+    just-completed flag's own one-shot lifecycle.
+    """
+    return f"generated_chore:{slug}:{chore_id}"
+
+
+def _create_next_occurrence(chore):
+    """Create the next occurrence of a just-completed recurring `chore`,
+    per issue #17: a new active `Chore` with the same `household`,
+    `owner`, `title`, `description`, `category` as `chore`, `due_date`
+    computed by `compute_next_due_date`, and its own cloned `Recurrence`
+    row (same `kind` and kind-specific fields -- `Recurrence` is
+    `OneToOne` with `Chore`, so the existing row can't be reused/moved).
+
+    `created_by` is copied from the completed chore too -- there's no
+    other partner to attribute authorship of a system-generated
+    occurrence to, and the plan doesn't distinguish "who created" from
+    "who owns" for recurrence purposes.
+
+    Returns the new `Chore`. Only called when `chore.recurrence` exists;
+    callers are responsible for that check.
+    """
+    recurrence = chore.recurrence
+    next_due_date = compute_next_due_date(recurrence, chore.completed_at)
+
+    next_chore = Chore.objects.create(
+        household=chore.household,
+        title=chore.title,
+        description=chore.description,
+        owner=chore.owner,
+        category=chore.category,
+        due_date=next_due_date,
+        created_by=chore.created_by,
+        status=ChoreStatus.ACTIVE,
+    )
+    Recurrence.objects.create(
+        chore=next_chore,
+        kind=recurrence.kind,
+        weekday=recurrence.weekday,
+        month_day=recurrence.month_day,
+        month_ordinal=recurrence.month_ordinal,
+        month_weekday=recurrence.month_weekday,
+        interval_days=recurrence.interval_days,
+    )
+    return next_chore
 
 
 def quick_add(request, slug):
@@ -222,6 +284,16 @@ def chore_complete(request, slug, chore_id):
     no Undo control) instead. This holds whether or not this POST
     actually changed anything, so a double-Done still lands on the
     confirmation page rather than a 500.
+
+    Per issue #17: if `chore` has a `Recurrence`, completing it also
+    synchronously creates the next occurrence (see
+    `_create_next_occurrence`) -- no cron/background job, per
+    `_docs/arch.md` §12. This only happens on the completion that
+    actually flips `status` (guarded by the same `!= COMPLETED` check
+    as the fields above), so a double-Done never generates a second
+    occurrence. The generated chore's id is stashed in the session
+    (`_generated_chore_session_key`) so `chore_undo` can find and
+    delete it if this completion is undone.
     """
     household = get_object_or_404(Household, slug=slug)
     chore = get_object_or_404(household.chores, pk=chore_id)
@@ -240,6 +312,10 @@ def chore_complete(request, slug, chore_id):
         chore.completed_at = timezone.now()
         chore.completed_by = acting_as
         chore.save()
+
+        if getattr(chore, "recurrence", None) is not None:
+            next_chore = _create_next_occurrence(chore)
+            request.session[_generated_chore_session_key(slug, chore.pk)] = next_chore.pk
 
     request.session[_just_completed_session_key(slug, chore.pk)] = True
     return redirect("chores:chore_just_completed", slug=slug, chore_id=chore.pk)
@@ -287,6 +363,16 @@ def chore_undo(request, slug, chore_id):
     Per issue #13: also resets `note` back to `""` when reverting, so a
     note attached to the undone completion doesn't linger and get
     misattributed to the chore's next completion.
+
+    Per issue #17: if that completion generated a next occurrence (see
+    `chore_complete`/`_create_next_occurrence`), Undo also deletes that
+    generated `Chore` (its `Recurrence` cascades automatically) so the
+    household ends up with exactly the original chore, active, and no
+    trace of the occurrence that was generated -- not just the reverted
+    original alongside an orphaned generated row. The generated chore's
+    id is looked up (and popped) from the session key `chore_complete`
+    set; it's popped unconditionally here rather than left to leak
+    across future completions of the same chore.
     """
     household = get_object_or_404(Household, slug=slug)
     chore = get_object_or_404(household.chores, pk=chore_id)
@@ -294,12 +380,17 @@ def chore_undo(request, slug, chore_id):
     if request.method != "POST":
         return redirect("chores:chore_detail", slug=slug, chore_id=chore.pk)
 
+    generated_chore_id = request.session.pop(_generated_chore_session_key(slug, chore.pk), None)
+
     if chore.status == ChoreStatus.COMPLETED:
         chore.status = ChoreStatus.ACTIVE
         chore.completed_at = None
         chore.completed_by = None
         chore.note = ""
         chore.save()
+
+        if generated_chore_id is not None:
+            household.chores.filter(pk=generated_chore_id).delete()
 
     return redirect("households:detail", slug=slug)
 
