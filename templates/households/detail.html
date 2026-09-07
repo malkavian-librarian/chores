@@ -33,7 +33,7 @@
       <ul>
         {% for chore in active_chores %}
           <li>
-            {{ chore.title }} - {{ chore.owner.name }}
+            <a href="{% url 'chores:chore_detail' slug=household.slug chore_id=chore.pk %}">{{ chore.title }}</a> - {{ chore.owner.name }}
             {% if chore.is_overdue %}<strong class="overdue">Overdue</strong>{% endif %}
           </li>
         {% endfor %}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block content %}
+<p>You're viewing household {{ household.slug }}.</p>
+<h1>{{ chore.title }}</h1>
+<form method="post">
+  {% csrf_token %}
+  {{ form.title.errors }}
+  {{ form.title.label_tag }} {{ form.title }}
+  <p>{{ form.description.label_tag }} {{ form.description }}</p>
+  <p>{{ form.owner.errors }} {{ form.owner.label_tag }} {{ form.owner }}</p>
+  <p>{{ form.due_date.label_tag }} {{ form.due_date }}</p>
+  <p>{{ form.category.label_tag }} {{ form.category }}</p>
+  <button type="submit">Save</button>
+</form>
+
+{% if can_delete %}
+<form method="post" action="{% url 'chores:chore_delete' slug=household.slug chore_id=chore.pk %}">
+  {% csrf_token %}
+  <button type="submit">Delete</button>
+</form>
+{% endif %}
+
+<p><a href="{% url 'households:detail' slug=household.slug %}">Back to household</a></p>
+{% endblock %}
