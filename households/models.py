@@ -40,12 +40,19 @@ class Household(models.Model):
         decided in issue #2) rather than letting a bare `IntegrityError`
         bubble up and break the homepage for a real visitor.
         """
+        # Imported locally (not at module level) to avoid a circular
+        # import: `categories.models` imports `Household` from this
+        # module.
+        from categories.services import seed_predefined_categories
+
         last_error = None
         for _ in range(MAX_SLUG_ATTEMPTS):
             slug = secrets.token_urlsafe(SLUG_BYTES)
             try:
                 with transaction.atomic():
-                    return cls.objects.create(slug=slug)
+                    household = cls.objects.create(slug=slug)
+                    seed_predefined_categories(household)
+                    return household
             except IntegrityError as exc:
                 last_error = exc
                 continue

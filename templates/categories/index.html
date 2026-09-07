@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 
 {% block content %}
-  <h1>Categories coming soon</h1>
+  <h1>Categories</h1>
+  <ul>
+    {% for category in categories %}
+      <li>{{ category.name }}</li>
+    {% endfor %}
+  </ul>
 {% endblock %}

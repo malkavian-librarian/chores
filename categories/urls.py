@@ -5,5 +5,5 @@ from . import views
 app_name = "categories"
 
 urlpatterns = [
-    path("", views.index, name="index"),
+    path("h/<str:slug>/categories/", views.index, name="index"),
 ]

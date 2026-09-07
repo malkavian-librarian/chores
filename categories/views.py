@@ -1,12 +1,28 @@
 """Views for the categories app.
 
-Placeholder only for issue #4 — no `Category` model or CRUD yet (that's
-#5/#6). This just gives the "Categories" nav link a real page.
+Bare listing only, per issue #5 — no CRUD yet (that's #6).
 """
 
+from django.http import Http404
 from django.shortcuts import render
 
+from households.models import Household
 
-def index(request):
-    """`GET /categories/` — placeholder page."""
-    return render(request, "categories/index.html")
+
+def index(request, slug):
+    """`GET /h/<slug>/categories/` — bare list of a household's categories.
+
+    Visiting a slug that doesn't exist returns 404, matching
+    `households:detail`.
+    """
+    household = Household.objects.filter(slug=slug).first()
+    if household is None:
+        raise Http404("No household matches this slug.")
+
+    categories = list(household.categories.all())
+
+    return render(
+        request,
+        "categories/index.html",
+        {"household": household, "categories": categories},
+    )

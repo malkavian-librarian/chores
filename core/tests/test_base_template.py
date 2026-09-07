@@ -19,7 +19,9 @@ from households.models import Household, Partner
 @pytest.mark.django_db
 class TestNavLinksReturn200:
     def test_categories_page_returns_200(self, client):
-        response = client.get(reverse("categories:index"))
+        household = Household.create_with_unique_slug()
+
+        response = client.get(reverse("categories:index", kwargs={"slug": household.slug}))
 
         assert response.status_code == 200
 
@@ -48,7 +50,9 @@ class TestBaseTemplateIsUsed:
         assert "households/detail.html" in template_names
 
     def test_categories_index_extends_base(self, client):
-        response = client.get(reverse("categories:index"))
+        household = Household.create_with_unique_slug()
+
+        response = client.get(reverse("categories:index", kwargs={"slug": household.slug}))
 
         template_names = [t.name for t in response.templates]
         assert "base.html" in template_names
@@ -65,8 +69,10 @@ class TestBaseTemplateIsUsed:
 @pytest.mark.django_db
 class TestNavBar:
     def test_nav_shows_three_labelled_links_on_every_page(self, client):
+        household = Household.create_with_unique_slug()
+
         for url in (
-            reverse("categories:index"),
+            reverse("categories:index", kwargs={"slug": household.slug}),
             reverse("households:settings"),
         ):
             content = client.get(url).content.decode()
@@ -75,20 +81,22 @@ class TestNavBar:
             assert ">Settings<" in content
 
     def test_categories_and_settings_links_use_url_tag_targets(self, client):
-        response = client.get(reverse("categories:index"))
+        household = Household.create_with_unique_slug()
+
+        response = client.get(reverse("categories:index", kwargs={"slug": household.slug}))
         content = response.content.decode()
 
-        assert reverse("categories:index") in content
+        assert reverse("categories:index", kwargs={"slug": household.slug}) in content
         assert reverse("households:settings") in content
 
     def test_household_link_points_at_index_without_household_context(self, client):
-        response = client.get(reverse("categories:index"))
+        response = client.get(reverse("households:settings"))
         content = response.content.decode()
 
         assert reverse("households:index") in content
 
     def test_household_link_points_at_current_household_when_in_context(self, client):
-        household = Household.objects.create(slug="current-household-nav")
+        household = Household.create_with_unique_slug()
         Partner.objects.create(household=household, name="Alex")
         Partner.objects.create(household=household, name="Sam")
 
@@ -96,6 +104,16 @@ class TestNavBar:
         content = response.content.decode()
 
         assert reverse("households:detail", kwargs={"slug": household.slug}) in content
+
+    def test_categories_link_points_at_current_household_when_in_context(self, client):
+        household = Household.create_with_unique_slug()
+        Partner.objects.create(household=household, name="Alex")
+        Partner.objects.create(household=household, name="Sam")
+
+        response = client.get(reverse("households:detail", kwargs={"slug": household.slug}))
+        content = response.content.decode()
+
+        assert reverse("categories:index", kwargs={"slug": household.slug}) in content
 
 
 class TestSingleColumnLayout:
