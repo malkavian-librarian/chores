@@ -11,6 +11,15 @@
   <p>{{ form.owner.errors }} {{ form.owner.label_tag }} {{ form.owner }}</p>
   <p>{{ form.due_date.label_tag }} {{ form.due_date }}</p>
   <p>{{ form.category.label_tag }} {{ form.category }}</p>
+  <fieldset>
+    <legend>Recurrence</legend>
+    <p>{{ form.recurrence_kind.errors }} {{ form.recurrence_kind.label_tag }} {{ form.recurrence_kind }}</p>
+    <p>{{ form.recurrence_weekday.errors }} {{ form.recurrence_weekday.label_tag }} {{ form.recurrence_weekday }}</p>
+    <p>{{ form.recurrence_monthly_mode.errors }} {{ form.recurrence_monthly_mode.label_tag }} {{ form.recurrence_monthly_mode }}</p>
+    <p>{{ form.recurrence_month_day.errors }} {{ form.recurrence_month_day.label_tag }} {{ form.recurrence_month_day }}</p>
+    <p>{{ form.recurrence_month_ordinal.errors }} {{ form.recurrence_month_ordinal.label_tag }} {{ form.recurrence_month_ordinal }}</p>
+    <p>{{ form.recurrence_month_weekday.errors }} {{ form.recurrence_month_weekday.label_tag }} {{ form.recurrence_month_weekday }}</p>
+  </fieldset>
   <button type="submit">Save</button>
 </form>
 

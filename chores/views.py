@@ -12,8 +12,36 @@ from django.utils import timezone
 from households.models import Household
 from households.views import _get_acting_as_partner
 
-from .forms import ChoreEditForm, ChoreQuickAddForm
-from .models import Chore, ChoreStatus
+from .forms import ChoreEditForm, ChoreQuickAddForm, recurrence_initial
+from .models import Chore, ChoreStatus, Recurrence
+
+
+def _apply_recurrence(chore, recurrence_kwargs):
+    """Set/change/clear `chore`'s `Recurrence` per issue #15's
+    acceptance criteria: `recurrence_kwargs` is the dict returned by
+    `BaseChoreForm.get_recurrence_kwargs()` (`None` for "no
+    recurrence"). Never touches `chore.owner` or any other `Chore`
+    field. Overwrites all five kind-specific fields on an existing row
+    wholesale so a kind switch never leaves stale values behind, and
+    runs `full_clean()` so `Recurrence.clean()`'s field-relevance
+    validation applies here too, not just via a form.
+    """
+    existing = getattr(chore, "recurrence", None)
+
+    if recurrence_kwargs is None:
+        if existing is not None:
+            existing.delete()
+        return
+
+    if existing is not None:
+        for field, value in recurrence_kwargs.items():
+            setattr(existing, field, value)
+        existing.full_clean()
+        existing.save()
+    else:
+        recurrence = Recurrence(chore=chore, **recurrence_kwargs)
+        recurrence.full_clean()
+        recurrence.save()
 
 
 def _just_completed_session_key(slug, chore_id):
@@ -53,7 +81,7 @@ def quick_add(request, slug):
         if form.is_valid():
             owner = form.cleaned_data["owner"]
             created_by = acting_as if acting_as is not None else owner
-            Chore.objects.create(
+            chore = Chore.objects.create(
                 household=household,
                 title=form.cleaned_data["title"],
                 description=form.cleaned_data["description"],
@@ -62,6 +90,7 @@ def quick_add(request, slug):
                 due_date=form.cleaned_data["due_date"],
                 created_by=created_by,
             )
+            _apply_recurrence(chore, form.get_recurrence_kwargs())
             return redirect("households:detail", slug=slug)
     else:
         form = ChoreQuickAddForm(household=household, acting_as=acting_as)
@@ -106,18 +135,18 @@ def chore_detail(request, slug, chore_id):
             chore.category = form.cleaned_data["category"]
             chore.due_date = form.cleaned_data["due_date"]
             chore.save()
+            _apply_recurrence(chore, form.get_recurrence_kwargs())
             return redirect("households:detail", slug=slug)
     else:
-        form = ChoreEditForm(
-            household=household,
-            initial={
-                "title": chore.title,
-                "description": chore.description,
-                "owner": chore.owner_id,
-                "due_date": chore.due_date,
-                "category": chore.category_id,
-            },
-        )
+        initial = {
+            "title": chore.title,
+            "description": chore.description,
+            "owner": chore.owner_id,
+            "due_date": chore.due_date,
+            "category": chore.category_id,
+        }
+        initial.update(recurrence_initial(getattr(chore, "recurrence", None)))
+        form = ChoreEditForm(household=household, initial=initial)
 
     can_delete = acting_as is not None and acting_as == chore.created_by
     is_active = chore.status == ChoreStatus.ACTIVE
