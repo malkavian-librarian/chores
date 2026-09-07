@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from chores.models import Chore, ChoreStatus
 
-from .forms import PartnerNamingForm
+from .forms import PartnerNamingForm, PartnerRenameForm
 from .models import Household, Partner
 
 SESSION_KEY = "household_slug"
@@ -134,15 +134,49 @@ def detail(request, slug):
     return render(request, "households/detail.html", {"household": household, "form": form})
 
 
-def settings_placeholder(request):
-    """`GET /settings/` — placeholder page for the "Settings" nav link.
+def settings(request, slug):
+    """`GET/POST /h/<slug>/settings/` — rename either partner (issue #19).
 
-    Not named `settings` as a Django app to avoid colliding with
-    `config/settings/` (see issue #4 Constraints); it lives as a plain
-    route on `households` instead, since it isn't household-scoped yet.
-    Real settings pages are #19/#20.
+    Not named as a Django app to avoid colliding with `config/settings/`
+    (see issue #4 Constraints); it lives as a plain household-scoped
+    route on `households` instead.
+
+    - Fewer than 2 `Partner` rows (reachable only by visiting the URL
+      directly before first-launch naming from #3 is complete): redirect
+      to the household detail page, which itself shows the naming form.
+    - GET: renders both partners' current names, pre-filled.
+    - POST valid: updates each `Partner.name` in place (same pk) and
+      redirects back here so a refresh doesn't resubmit the form.
     """
-    return render(request, "households/settings.html")
+    household = get_object_or_404(Household, slug=slug)
+    partners = list(household.partners.order_by("pk"))
+
+    if len(partners) < 2:
+        return redirect("households:detail", slug=slug)
+
+    partner_1, partner_2 = partners[0], partners[1]
+
+    if request.method == "POST":
+        form = PartnerRenameForm(request.POST)
+        if form.is_valid():
+            partner_1.name = form.cleaned_data["partner_1_name"]
+            partner_2.name = form.cleaned_data["partner_2_name"]
+            partner_1.save(update_fields=["name"])
+            partner_2.save(update_fields=["name"])
+            return redirect("households:settings", slug=slug)
+    else:
+        form = PartnerRenameForm(
+            initial={
+                "partner_1_name": partner_1.name,
+                "partner_2_name": partner_2.name,
+            }
+        )
+
+    return render(
+        request,
+        "households/settings.html",
+        {"household": household, "form": form, "partners": partners},
+    )
 
 
 def set_acting_as(request, slug):

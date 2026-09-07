@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from django.conf import settings
+from django.template.loader import render_to_string
 from django.urls import reverse
 
 from households.models import Household, Partner
@@ -26,7 +27,11 @@ class TestNavLinksReturn200:
         assert response.status_code == 200
 
     def test_settings_page_returns_200(self, client):
-        response = client.get(reverse("households:settings"))
+        household = Household.create_with_unique_slug()
+        Partner.objects.create(household=household, name="Alex")
+        Partner.objects.create(household=household, name="Sam")
+
+        response = client.get(reverse("households:settings", kwargs={"slug": household.slug}))
 
         assert response.status_code == 200
 
@@ -59,7 +64,11 @@ class TestBaseTemplateIsUsed:
         assert "categories/index.html" in template_names
 
     def test_settings_extends_base(self, client):
-        response = client.get(reverse("households:settings"))
+        household = Household.create_with_unique_slug()
+        Partner.objects.create(household=household, name="Alex")
+        Partner.objects.create(household=household, name="Sam")
+
+        response = client.get(reverse("households:settings", kwargs={"slug": household.slug}))
 
         template_names = [t.name for t in response.templates]
         assert "base.html" in template_names
@@ -70,10 +79,12 @@ class TestBaseTemplateIsUsed:
 class TestNavBar:
     def test_nav_shows_three_labelled_links_on_every_page(self, client):
         household = Household.create_with_unique_slug()
+        Partner.objects.create(household=household, name="Alex")
+        Partner.objects.create(household=household, name="Sam")
 
         for url in (
             reverse("categories:index", kwargs={"slug": household.slug}),
-            reverse("households:settings"),
+            reverse("households:settings", kwargs={"slug": household.slug}),
         ):
             content = client.get(url).content.decode()
             assert ">Household<" in content
@@ -87,11 +98,13 @@ class TestNavBar:
         content = response.content.decode()
 
         assert reverse("categories:index", kwargs={"slug": household.slug}) in content
-        assert reverse("households:settings") in content
+        assert reverse("households:settings", kwargs={"slug": household.slug}) in content
 
-    def test_household_link_points_at_index_without_household_context(self, client):
-        response = client.get(reverse("households:settings"))
-        content = response.content.decode()
+    def test_household_link_points_at_index_without_household_context(self):
+        # Every current route renders `base.html` with a `household` in
+        # context, so the no-household fallback is exercised by rendering
+        # the template directly rather than via a real request.
+        content = render_to_string("base.html", {})
 
         assert reverse("households:index") in content
 

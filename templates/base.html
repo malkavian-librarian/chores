@@ -11,7 +11,7 @@
     <div class="max-w-2xl mx-auto flex gap-6 px-4 py-3">
       <a href="{% if household %}{% url 'households:detail' slug=household.slug %}{% else %}{% url 'households:index' %}{% endif %}">Household</a>
       <a href="{% if household %}{% url 'categories:index' slug=household.slug %}{% else %}{% url 'households:index' %}{% endif %}">Categories</a>
-      <a href="{% url 'households:settings' %}">Settings</a>
+      <a href="{% if household %}{% url 'households:settings' slug=household.slug %}{% else %}{% url 'households:index' %}{% endif %}">Settings</a>
     </div>
   </nav>
   <main class="max-w-2xl mx-auto px-4 py-6">

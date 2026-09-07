@@ -28,3 +28,25 @@ class PartnerNamingForm(forms.Form):
         max_length=PARTNER_NAME_MAX_LENGTH,
         strip=True,
     )
+
+
+class PartnerRenameForm(forms.Form):
+    """Settings-page form for renaming both partners at once (issue #19).
+
+    Both fields are required, trimmed of surrounding whitespace, capped at
+    `PARTNER_NAME_MAX_LENGTH`, and whitespace-only input is rejected the
+    same as blank input -- same validation pattern as `PartnerNamingForm`.
+    Duplicate names across the two fields (or a no-op rename back to the
+    same current name) are allowed (see issue #3 acceptance criteria).
+    """
+
+    partner_1_name = forms.CharField(
+        label="Partner 1 name",
+        max_length=PARTNER_NAME_MAX_LENGTH,
+        strip=True,
+    )
+    partner_2_name = forms.CharField(
+        label="Partner 2 name",
+        max_length=PARTNER_NAME_MAX_LENGTH,
+        strip=True,
+    )
